@@ -1,4 +1,5 @@
 <?php
+
 namespace Dilab;
 
 use Cake\Filesystem\File;
@@ -7,6 +8,7 @@ use Dilab\Network\Request;
 use Dilab\Network\Response;
 use Monolog\Logger;
 use Monolog\Handler\StreamHandler;
+use Illuminate\Support\Facades\Cache;
 
 class Resumable
 {
@@ -35,7 +37,7 @@ class Resumable
         $this->response = $response;
 
         $this->log = new Logger('debug');
-        $this->log->pushHandler(new StreamHandler('debug.log', Logger::DEBUG));
+        $this->log->pushHandler(new StreamHandler(storage_path('debug.log'), Logger::DEBUG));
     }
 
     public function process()
@@ -77,8 +79,16 @@ class Resumable
         }
 
         if ($this->isFileUploadComplete($filename, $identifier, $chunkSize, $totalSize)) {
-            $this->createFileAndDeleteTmp($identifier, $filename);
+            if (!Cache::tags('resumable')->has('complete_' . $identifier)) {
+                sleep(rand(1,5));
+                if (!Cache::tags('resumable')->has('complete_' . $identifier)) {
+                    Cache::tags('resumable')->put('complete_' . $identifier, '1', 5);
+                    //_l('re-compelete', [$filename, $identifier, $chunkSize, $totalSize], 'debug', 1);
+                    $this->createFileAndDeleteTmp($identifier, $filename);
+                }
+            }
             return $this->response->header(201);
+
         }
 
         return $this->response->header(200);
@@ -135,8 +145,16 @@ class Resumable
     public function tmpChunkDir($identifier)
     {
         $tmpChunkDir = $this->tempFolder . DIRECTORY_SEPARATOR . $identifier;
+
         if (!file_exists($tmpChunkDir)) {
-            mkdir($tmpChunkDir);
+            if (!Cache::tags('resumable')->has('exist_' . $tmpChunkDir)) {
+                sleep(rand(1,5));
+                if (!Cache::tags('resumable')->has('exist_' . $tmpChunkDir)) {
+                    Cache::tags('resumable')->put('exist_' . $tmpChunkDir, '1', 5);
+                    //_l('re', [$identifier, $tmpChunkDir], 'debug', 1);
+                    mkdir($tmpChunkDir);
+                }
+            }
         }
         return $tmpChunkDir;
     }
