@@ -9,6 +9,7 @@ use Dilab\Network\Response;
 use Monolog\Logger;
 use Monolog\Handler\StreamHandler;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Redis;
 
 class Resumable
 {
@@ -28,6 +29,8 @@ class Resumable
     protected $params;
 
     protected $chunkFile;
+
+    protected $chunkNumber;
 
     protected $log;
 
@@ -69,7 +72,7 @@ class Resumable
         $file = $this->request->file();
         $identifier = $this->resumableParam('identifier');
         $filename = $this->resumableParam('filename');
-        $chunkNumber = $this->resumableParam('chunkNumber');
+        $this->chunkNumber = $chunkNumber = $this->resumableParam('chunkNumber');
         $chunkSize = $this->resumableParam('chunkSize');
         $totalSize = $this->resumableParam('totalSize');
 
@@ -79,18 +82,16 @@ class Resumable
         }
 
         if ($this->isFileUploadComplete($filename, $identifier, $chunkSize, $totalSize)) {
-            if (!Cache::tags('resumable')->has('complete_' . $identifier)) {
-                sleep(rand(1,5));
-                if (!Cache::tags('resumable')->has('complete_' . $identifier)) {
-                    Cache::tags('resumable')->put('complete_' . $identifier, '1', 5);
-                    //_l('re-compelete', [$filename, $identifier, $chunkSize, $totalSize], 'debug', 1);
-                    $this->createFileAndDeleteTmp($identifier, $filename);
-                }
+            $key = 'resumable:cms:complete:' . $identifier;
+            $r = Redis::incr($key);
+            if ($r == 1) {
+                $this->createFileAndDeleteTmp($identifier, $filename);
+                return $this->response->header(201);
             }
-            return $this->response->header(201);
-
+            else {
+                Redis::decr($key);
+            }
         }
-
         return $this->response->header(200);
     }
 
@@ -147,15 +148,16 @@ class Resumable
         $tmpChunkDir = $this->tempFolder . DIRECTORY_SEPARATOR . $identifier;
 
         if (!file_exists($tmpChunkDir)) {
-            if (!Cache::tags('resumable')->has('exist_' . $tmpChunkDir)) {
-                sleep(rand(1,5));
-                if (!Cache::tags('resumable')->has('exist_' . $tmpChunkDir)) {
-                    Cache::tags('resumable')->put('exist_' . $tmpChunkDir, '1', 5);
-                    //_l('re', [$identifier, $tmpChunkDir], 'debug', 1);
-                    mkdir($tmpChunkDir);
-                }
+            $key = 'resumable:cms:exist:' . $identifier;
+            $r = Redis::incr($key);
+            if ($r == 1) {
+                mkdir($tmpChunkDir);
+            }
+            else {
+                Redis::decr($key);
             }
         }
+
         return $tmpChunkDir;
     }
 
