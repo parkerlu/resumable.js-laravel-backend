@@ -108,29 +108,31 @@ it is not good for paralleled uploading in fast network.
 ## changes
 
 ```
-public function tmpChunkDir($identifier)
+
+    public function tmpChunkDir($identifier)
     {
         $tmpChunkDir = $this->tempFolder . DIRECTORY_SEPARATOR . $identifier;
 
         if (!file_exists($tmpChunkDir)) {
-            if (!Cache::tags('resumable')->has('exist_' . $tmpChunkDir)) {
-                sleep(rand(1,5));
-                if (!Cache::tags('resumable')->has('exist_' . $tmpChunkDir)) {
-                    Cache::tags('resumable')->put('exist_' . $tmpChunkDir, '1', 5);
-                    //_l('re', [$identifier, $tmpChunkDir], 'debug', 1);
-                    mkdir($tmpChunkDir);
-                }
+            $key = 'resumable:cms:exist:' . $identifier;
+            $r = Redis::incr($key);
+            if ($r == 1) {
+                mkdir($tmpChunkDir);
+            }
+            else {
+                Redis::setex($key,60,3);
             }
         }
+
         return $tmpChunkDir;
     }
     
-    public function handleChunk()
+     public function handleChunk()
     {
         $file = $this->request->file();
         $identifier = $this->resumableParam('identifier');
         $filename = $this->resumableParam('filename');
-        $chunkNumber = $this->resumableParam('chunkNumber');
+        $this->chunkNumber = $chunkNumber = $this->resumableParam('chunkNumber');
         $chunkSize = $this->resumableParam('chunkSize');
         $totalSize = $this->resumableParam('totalSize');
 
@@ -140,21 +142,19 @@ public function tmpChunkDir($identifier)
         }
 
         if ($this->isFileUploadComplete($filename, $identifier, $chunkSize, $totalSize)) {
-            if (!Cache::tags('resumable')->has('complete_' . $identifier)) {
-                sleep(rand(1,5));
-                if (!Cache::tags('resumable')->has('complete_' . $identifier)) {
-                    Cache::tags('resumable')->put('complete_' . $identifier, '1', 5);
-                    //_l('re-compelete', [$filename, $identifier, $chunkSize, $totalSize], 'debug', 1);
-                    $this->createFileAndDeleteTmp($identifier, $filename);
-                }
+            $key = 'resumable:cms:complete:' . $identifier;
+            $r = Redis::incr($key);
+            if ($r == 1) {
+                $this->createFileAndDeleteTmp($identifier, $filename);
+                return $this->response->header(201);
             }
-            return $this->response->header(201);
-
+            else {
+                Redis::setex($key,60,3);
+            }
         }
-
         return $this->response->header(200);
     }
 
-=
+
 ```
 
